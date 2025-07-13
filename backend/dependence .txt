@@ -1,0 +1,5 @@
+npm iniit
+npm i express
+npm install --save-dev nodemon
+npm install pg dotenv
+npm install exceljs pg  # Use 'mysql2' if you're using MySQL instead of PostgreSQL

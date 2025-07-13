@@ -1,0 +1,5 @@
+day -2
+get {{URL}}/admin/data/expiring_medicines?days=
+    {{URL}}/admin/data/expiring_medicines?months=
+    {{URL}}/admin/data/expiring_medicines?year=200
+get 
