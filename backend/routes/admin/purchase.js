@@ -1,21 +1,67 @@
 const express = require('express');
 const router = express.Router();
+
+//=======================================================//
+//reportgeneration route
+//=======================================================// 
+
 const {
-  handleExcelExport,
-  handleGetMedicineStockData,
-  handleGetwholesalersData,
-  handleGetInvoicesData,
-    MedicineSearchQuery,
-} = require('../../controller/purchaseController'); // adjust path
+  handleExcelExport 
+} = require('../../controller/excelReport'); // adjust path
+router.get('/export/excel', handleExcelExport);
+
+
+//===========================================================//
+//medicine_stock route
+//==========================================================//
+
+
+
 
 const { handleExpiringMedicines } = require('../../controller/expiringController'); // adjust path
 
-router.get('/export/excel', handleExcelExport);
-router.get('/data/medicine_stock', handleGetMedicineStockData);
-router.get('/data/wholesalers', handleGetwholesalersData);
-router.get('/data/invoices',handleGetInvoicesData);
-router.get('/data/expiring_medicines', handleExpiringMedicines); // adjust path
-router.get('/data/medicines/search',   MedicineSearchQuery); // adjust path
+const { handleGetMedicineStockData,
+   MedicineSearchQuery ,
+   addMedicineStock,
+  updateMedicine_info,
+} = require('../../controller/medicine_stock'); // adjust
 
 
+router.get('/medicine_stock', handleGetMedicineStockData);
+router.get('/medicines/search',   MedicineSearchQuery); // adjust path
+router.post('/medicine_stock', addMedicineStock); // adjust path
+router.put('/medicine_stock/:id', updateMedicine_info); // adjust path
+
+
+//===========================================================//
+//invoice route
+//==========================================================//
+
+const {  handleGetInvoicesData,
+  addNewInvoice,
+  updateInvoice,
+  deleteInvoice,
+InvoiceSerach} = require('../../controller/invoicesController'); // adjust path
+
+router.get('/invoice',handleGetInvoicesData);
+router.post('/invoice', addNewInvoice); // adjust path
+router.put('/invoice/:id', updateInvoice); // adjust path
+router.delete('/invoice/:id', deleteInvoice); // adjust path
+router.get('/invoicesSearch',InvoiceSerach);
+router.get('/expiring_medicines', handleExpiringMedicines); // adjust path
+
+//===========================================================//
+//wholeslers route  
+//==========================================================//
+
+const { addWholesaler,
+    updateWholesalerData ,
+    handleGetwholesalersData,
+  deleteWholesaler} = require('../../controller/wholesalerController'); // adjust path
+
+
+router.get('/wholesalers', handleGetwholesalersData);
+router.post('/Wholesaler', addWholesaler); // adjust path
+router.put('/Wholesaler/:id', updateWholesalerData); // adjust path
+router.delete('/Wholesaler/:id', deleteWholesaler); // adjust path
 module.exports = router;

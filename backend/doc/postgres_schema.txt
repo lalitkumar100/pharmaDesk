@@ -1,0 +1,120 @@
+
+-- Create ENUM
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_status_enum') THEN
+        CREATE TYPE payment_status_enum AS ENUM ('Paid', 'Unpaid', 'Partial');
+    END IF;
+END$$;
+
+-- Create wholesalers table
+CREATE TABLE IF NOT EXISTS wholesalers (
+    wholesaler_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    gst_no VARCHAR(20) UNIQUE NOT NULL,
+    address TEXT,
+    contact VARCHAR(15),
+    email VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create invoices table
+CREATE TABLE IF NOT EXISTS invoices (
+    invoice_id SERIAL PRIMARY KEY,
+    invoice_no VARCHAR(20) UNIQUE NOT NULL,
+    invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    total_amount NUMERIC(12,2) CHECK (total_amount >= 0) NOT NULL,
+    payment_status payment_status_enum DEFAULT 'Unpaid' NOT NULL,
+    payment_date DATE,
+    wholesaler_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_wholesaler FOREIGN KEY (wholesaler_id)
+        REFERENCES wholesalers(wholesaler_id)
+        ON DELETE CASCADE
+);
+
+-- Create medicine_stock table
+CREATE TABLE IF NOT EXISTS medicine_stock (
+    medicine_id SERIAL PRIMARY KEY,
+    invoice_id INT NOT NULL,
+    medicine_name VARCHAR(100) NOT NULL,
+    brand_name VARCHAR(100),
+    stock_quantity INT CHECK (stock_quantity > 0),
+    mfg_date DATE,
+    expiry_date DATE,
+    purchase_price NUMERIC(10,2) CHECK (purchase_price >= 0),
+    mrp NUMERIC(10,2) CHECK (mrp >= 0),
+    batch_no VARCHAR(20),
+    packed_type VARCHAR(50),
+    invoice_no VARCHAR(20)  NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_invoice FOREIGN KEY (invoice_id)
+        REFERENCES invoices(invoice_id)
+        ON DELETE CASCADE
+);
+
+-- Create or replace function for timestamp update
+CREATE OR REPLACE FUNCTION update_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+   NEW.updated_at = CURRENT_TIMESTAMP;
+   RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Triggers
+CREATE OR REPLACE TRIGGER trg_update_wholesalers
+BEFORE UPDATE ON wholesalers
+FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+CREATE OR REPLACE TRIGGER trg_update_invoices
+BEFORE UPDATE ON invoices
+FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+CREATE OR REPLACE TRIGGER trg_update_medicine_stock
+BEFORE UPDATE ON medicine_stock
+FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+-- DATA INSERTS
+
+-- Wholesalers
+INSERT INTO wholesalers (name, gst_no, address, contact, email) VALUES
+  ('HealthMart Pharma', '27HMP1234A1Z5', '12 Sector Road, Mumbai, MH - 400001', '9876543210', 'contact@healthmartpharma.com'),
+  ('Lifeline Distributors', '07LLD5678B2Z7', 'A-23 Connaught Place, Delhi - 110001', '9812345678', 'sales@lifelinedistributors.in'),
+  ('CureMed Pharma', '19CMP8765C3Z2', '56 Salt Lake Sector 3, Kolkata - 700091', '9123456780', 'info@curemedpharma.com');
+
+-- Invoices
+INSERT INTO invoices (invoice_no, total_amount, payment_status, payment_date, wholesaler_id) VALUES
+  ('HMP-001', 8550.00, 'Unpaid', NULL, 1),
+  ('HMP-002', 10300.00, 'Unpaid', NULL, 1),
+  ('LLD-001', 7320.00, 'Unpaid', NULL, 2),
+  ('CMP-001', 8760.00, 'Unpaid', NULL, 3);
+
+-- Medicine Stock
+INSERT INTO medicine_stock (invoice_id, medicine_name, brand_name, stock_quantity, mfg_date, expiry_date, purchase_price, mrp, batch_no, packed_type, invoice_no) VALUES
+  (1, 'Paracetamol', 'Crocin', 100, '2024-05-01', '2026-05-01', 12.00, 20.00, 'PC123A', 'Strip', 'HMP-001'),
+  (1, 'Amoxicillin', 'Mox 500', 50, '2024-08-01', '2026-08-01', 45.00, 70.00, 'AM456B', 'Strip', 'HMP-001'),
+  (1, 'Cetirizine', 'Cetzine', 200, '2023-11-01', '2025-11-01', 6.00, 10.00, 'CZ789C', 'Strip', 'HMP-001'),
+  (1, 'Ibuprofen', 'Brufen', 150, '2024-04-01', '2026-04-01', 18.00, 30.00, 'IB321D', 'Strip', 'HMP-001'),
+  (1, 'Omeprazole', 'Omez', 120, '2024-06-01', '2026-06-01', 10.00, 18.00, 'OM654E', 'Strip', 'HMP-001'),
+
+  (2, 'Azithromycin', 'Azithral', 60, '2024-03-01', '2026-03-01', 28.00, 45.00, 'AZ001B', 'Strip', 'HMP-002'),
+  (2, 'Dolo 650', 'Dolo', 200, '2024-01-01', '2026-01-01', 16.00, 25.00, 'DL650C', 'Strip', 'HMP-002'),
+  (2, 'Rabeprazole', 'Razo', 100, '2024-02-01', '2026-02-01', 20.00, 35.00, 'RP100D', 'Strip', 'HMP-002'),
+  (2, 'Losartan', 'Losar', 90, '2023-12-01', '2025-12-01', 18.00, 28.00, 'LS789E', 'Strip', 'HMP-002'),
+  (2, 'Metronidazole', 'Flagyl', 150, '2024-05-01', '2026-05-01', 12.00, 22.00, 'FG456F', 'Strip', 'HMP-002'),
+
+  (3, 'Metformin', 'Glycomet', 80, '2024-06-01', '2026-01-01', 22.00, 35.00, 'MF234F', 'Strip', 'LLD-001'),
+  (3, 'Atorvastatin', 'Lipicure', 60, '2024-01-01', '2026-07-01', 28.00, 50.00, 'AT345G', 'Strip', 'LLD-001'),
+  (3, 'Levocetirizine', 'Levocet', 90, '2024-04-01', '2025-12-01', 8.00, 12.00, 'LV456H', 'Strip', 'LLD-001'),
+  (3, 'Diclofenac', 'Voveran', 100, '2024-03-01', '2026-03-01', 14.00, 25.00, 'DC567I', 'Strip', 'LLD-001'),
+  (3, 'Pantoprazole', 'Pantocid', 110, '2024-02-01', '2026-06-01', 16.00, 28.00, 'PT678J', 'Strip', 'LLD-001'),
+
+  (4, 'Esomeprazole', 'Nexpro', 70, '2024-05-01', '2026-05-01', 34.00, 55.00, 'ES123F', 'Strip', 'CMP-001'),
+  (4, 'Rosuvastatin', 'Crestor', 55, '2024-01-01', '2026-01-01', 48.00, 75.00, 'RS234G', 'Strip', 'CMP-001'),
+  (4, 'Lisinopril', 'Zestril', 65, '2023-11-01', '2025-11-01', 20.00, 32.00, 'LS345H', 'Strip', 'CMP-001'),
+  (4, 'Fluconazole', 'Forcan', 90, '2024-03-01', '2026-03-01', 16.00, 27.00, 'FC456I', 'Strip', 'CMP-001'),
+  (4, 'Loratadine', 'Claritin', 100, '2024-02-01', '2026-02-01', 10.00, 18.00, 'LR567J', 'Strip', 'CMP-001');

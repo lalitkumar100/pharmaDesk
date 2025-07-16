@@ -8,6 +8,7 @@
 
 function buildMedicineSearchQuery(params) {
   const {
+    medicine_id,
     medicine_name,
     brand_name,
     batch_no,
@@ -54,6 +55,10 @@ function buildMedicineSearchQuery(params) {
   let idx = 1;
 
   // -- filters --
+  if( medicine_id) {
+    text += ` AND ms.medicine_id = $${idx++}`;
+    values.push(medicine_id);
+  };
   if (medicine_name) {
     text += ` AND ms.medicine_name ILIKE $${idx++}`;
     values.push(`%${medicine_name}%`);

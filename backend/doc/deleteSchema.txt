@@ -1,0 +1,15 @@
+-- Drop triggers first (optional, but good practice)
+DROP TRIGGER IF EXISTS trg_update_wholesalers ON wholesalers;
+DROP TRIGGER IF EXISTS trg_update_invoices ON invoices;
+DROP TRIGGER IF EXISTS trg_update_medicine_stock ON medicine_stock;
+
+-- Drop the trigger function
+DROP FUNCTION IF EXISTS update_timestamp();
+
+-- Drop dependent tables (child to parent order)
+DROP TABLE IF EXISTS medicine_stock CASCADE;
+DROP TABLE IF EXISTS invoices CASCADE;
+DROP TABLE IF EXISTS wholesalers CASCADE;
+
+-- Drop ENUM type (after dropping all tables using it)
+DROP TYPE IF EXISTS payment_status_enum;

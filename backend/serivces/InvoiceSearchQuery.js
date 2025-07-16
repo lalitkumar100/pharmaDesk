@@ -9,12 +9,13 @@
 function buildInvoiceSearchQuery(params) {
   const {
     invoice_no,
- 
-    
+    invoice_id,
     payment_status,
     payment_date,
     total_amount,
     wholesaler_name,
+    invoice_date_from,
+    invoice_date_to,
 
     // pagination & sorting
     limit,
@@ -41,6 +42,10 @@ function buildInvoiceSearchQuery(params) {
   let idx = 1;
 
   // -- filters --
+ if (invoice_id) {
+  text += ` AND i.invoice_id = $${idx++}`;
+  values.push(parseInt(invoice_id, 10));
+}
   if (invoice_no) {
     text += ` AND i.invoice_no ILIKE $${idx++}`;
     values.push(`%${invoice_no}%`);
@@ -98,8 +103,9 @@ function buildInvoiceSearchQuery(params) {
     text += ` OFFSET $${idx++}`;
     values.push(parseInt(offset, 10));
   }
-
+   console.log(text);
+   console.log(values);
   return { text, values };
 }
 
-module.exports = buildInvoiceSearchQuery;
+module.exports ={ buildInvoiceSearchQuery };
