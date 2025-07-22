@@ -1,8 +1,7 @@
 // =======================
 // Module Imports
 // =======================
-const Joi = require('joi');
-const pool = require('../config/db');
+
 const asyncHandler = require('../serivces/asyncHandler');
 
 const {
@@ -31,20 +30,6 @@ const handleExcelExport = asyncHandler(async (req, res) => {
   const workbook = await generateExcelFromData(data, tableName);
   await sendExcelResponse(res, workbook, tableName);
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 // =======================

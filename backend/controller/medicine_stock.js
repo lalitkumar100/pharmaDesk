@@ -11,7 +11,8 @@ const getWholesalerIdByName = async (name) => {
 
 // Get or create invoice
 const getOrCreateInvoice = async (invoiceNumber, wholesalerId) => {
-  const queryInvoice = 'SELECT invoice_id FROM invoices WHERE invoice_no = $1 AND wholesaler_id = $2';
+  try {
+    const queryInvoice = 'SELECT invoice_id FROM invoices WHERE invoice_no = $1 AND wholesaler_id = $2';
   const result = await pool.query(queryInvoice, [invoiceNumber, wholesalerId]);
 
   if (result.rowCount > 0) return result.rows[0].invoice_id;
@@ -25,19 +26,19 @@ const getOrCreateInvoice = async (invoiceNumber, wholesalerId) => {
   if (insertResult.rowCount === 0) return null;
 
   return insertResult.rows[0].invoice_id;
+  } catch (error) {
+    throw new Error('Failed to get or create invoice');
+    
+  }
 };
 
-const updateInvoiceTotal = async (invoiceId, totalAmount) => {
+const updateInvoiceTotal = async (invoiceId, Amount) => {
   try {
-    const queryCheck = 'SELECT total_amount FROM invoices WHERE invoice_id = $1';
-    const result = await pool.query(queryCheck, [invoiceId])?.rows[0] ;
-    const newTotalAmount = result.rows[0].total_amount + totalAmount;
     const query = `UPDATE invoices
-      SET total_amount = $1 ,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE invoice_id = $3
+      SET total_amount =total_amount+ $1 
+      WHERE invoice_id = $2;
     `;
-    await pool.query(query, [newTotalAmount, invoiceId]); // ✅ Correct variable
+    await pool.query(query, [Amount, invoiceId]); // ✅ Correct variable
   } catch (error) {
     res.status(500);
     throw new Error('Failed to update invoice total');
@@ -50,27 +51,29 @@ const addMedicineStock = asyncHandler(async (req, res) => {
   const { wholesaler, invoiceNumber, medicine } = req.body;
 
   if (!wholesaler || !invoiceNumber || !Array.isArray(medicine)) {
-  res.status(400);
-  throw new Error('Invalid request body');
-}
+    res.status(400);
+    throw new Error('Invalid request body');
+  }
 
-
-  // 1. Get Wholesaler ID
+  // 1. Wholesaler check
   const wholesalerId = await getWholesalerIdByName(wholesaler);
   if (!wholesalerId) {
     res.status(400);
     throw new Error('Wholesaler not found. Please register first.');
   }
 
-  // 2. Get or create Invoice
+  // 2. Get or create invoice
   const invoiceId = await getOrCreateInvoice(invoiceNumber, wholesalerId);
   if (!invoiceId) {
     res.status(400);
     throw new Error('Invoice not found or failed to create.');
   }
 
-  // 3. Insert medicine records
+  // 3. Prepare to insert
   let totalAmount = 0;
+
+  // In-memory duplicate check
+  const seenMedicines = new Set();
 
   for (const med of medicine) {
     const {
@@ -79,23 +82,31 @@ const addMedicineStock = asyncHandler(async (req, res) => {
       brand_name,
       expiry_date,
       batch_no,
-      purchase_price,
+      purchase_price = 0,
       mrp,
       mfg_date,
-      stock_quantity,
+      stock_quantity = 0,
     } = med;
 
-    // Duplicate check
+    // In-request duplicate key
+    const key = `${packed_type}|${medicine_name}|${brand_name}|${expiry_date}|${batch_no}`;
+    if (seenMedicines.has(key)) {
+      res.status(409);
+      throw new Error(`Duplicate medicine "${medicine_name}" with batch "${batch_no}" found in request.`);
+    }
+    seenMedicines.add(key);
+
+    // DB duplicate check
     const checkQuery = `
       SELECT medicine_id FROM medicine_stock
-      WHERE packed_type = $1 AND medicine_name = $2 AND brand_name = $3 AND expiry_date = $4 AND batch_no = $5 AND  invoice_id = $6 `;
+      WHERE packed_type = $1 AND medicine_name = $2 AND brand_name = $3  AND batch_no = $4 AND invoice_id = $5
+    `;
     const result = await pool.query(checkQuery, [
       packed_type,
       medicine_name,
       brand_name,
-      expiry_date,
       batch_no,
-      invoiceId
+      invoiceId,
     ]);
 
     if (result.rowCount > 0) {
@@ -107,10 +118,19 @@ const addMedicineStock = asyncHandler(async (req, res) => {
     // Insert medicine
     const insertQuery = `
       INSERT INTO medicine_stock (
-        packed_type, medicine_name, brand_name, expiry_date, batch_no,
-        purchase_price, mrp, mfg_date, stock_quantity, invoice_id
+        packed_type,
+        medicine_name, 
+        brand_name, 
+        expiry_date,
+        batch_no,
+        purchase_price, 
+        mrp, 
+        mfg_date, 
+        stock_quantity, 
+        invoice_id,
+        invoice_no
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     `;
     await pool.query(insertQuery, [
       packed_type,
@@ -122,21 +142,15 @@ const addMedicineStock = asyncHandler(async (req, res) => {
       mrp,
       mfg_date,
       stock_quantity,
-      invoiceId
+      invoiceId,
+      invoiceNumber
     ]);
-    if (!purchase_price || !stock_quantity) {
-        purchase_price=0;
-        stock_quantity=0;
-}
-totalAmount += Number(purchase_price) * Number(stock_quantity);
 
-    // Total price calc
     totalAmount += Number(purchase_price) * Number(stock_quantity);
   }
 
   // 4. Update invoice total
-    await updateInvoiceTotal(invoiceId, totalAmount);
-
+  await updateInvoiceTotal(invoiceId, totalAmount);
 
   res.status(201).json({
     message: 'Medicines added successfully and invoice updated.',
@@ -144,6 +158,7 @@ totalAmount += Number(purchase_price) * Number(stock_quantity);
     totalAddedAmount: totalAmount
   });
 });
+
 
 
 //===================================================
@@ -163,80 +178,75 @@ const updateMedicine_info = asyncHandler(async (req, res) => {
     mrp,
     mfg_date,
     stock_quantity,
-    invoice_no
   } = req.body;
-  let  chexckBatchnoInvoice =false;
+
   // Step 1: Get current medicine data
   const { rows: oldRows } = await pool.query(
     'SELECT * FROM medicine_stock WHERE medicine_id = $1',
     [medicine_id]
   );
-   
+  
   if (oldRows.length === 0) {
    throw new Error('Medicine not found. Please check the ID.');
   }
-    if ( batch_no && invoice_no && batch_no!=oldRows.batch_no &&  invoice_no!=oldMedicine.invoice_no) {
-  
-    chexckBatchnoInvoice= true;;
-  }
-
   const oldMedicine = oldRows[0];
-  const invoiceId = oldMedicine.invoice_id;
+
+  
+  const invoiceId =oldRows[0].invoice_id;
+  let checkPurchasePrice = false;
+  let checkStock_quantity = false;
 
   // Step 2: Prepare dynamic SET clause
   const fields = [];
   const values = [];
   let index = 1;
 
-  if (medicine_name) {
+  if (medicine_name && medicine_name !== oldMedicine.medicine_name) {
     fields.push(`medicine_name = $${index++}`);
     values.push(medicine_name);
   }
-  if (brand_name) {
+  if (brand_name && brand_name !== oldMedicine.brand_name) {
     fields.push(`brand_name = $${index++}`);
     values.push(brand_name);
   }
-  if (stock_quantity !== undefined) {
+  if (stock_quantity !== undefined && stock_quantity !== oldMedicine.stock_quantity) {
     fields.push(`stock_quantity = $${index++}`);
     values.push(stock_quantity);
+    checkStock_quantity = true;
   }
-  if (mfg_date) {
+  if (mfg_date && mfg_date !== oldMedicine.mfg_date) {
     fields.push(`mfg_date = $${index++}`);
     values.push(mfg_date);
   }
-  if (expiry_date) {
+  if (expiry_date && expiry_date !== oldMedicine.expiry_date) {
     fields.push(`expiry_date = $${index++}`);
     values.push(expiry_date);
   }
-  if (purchase_price !== undefined) {
+  if (purchase_price !== undefined && purchase_price !== oldMedicine.purchase_price) {
     fields.push(`purchase_price = $${index++}`);
     values.push(purchase_price);
+    checkPurchasePrice = true;
   }
-  if (mrp !== undefined) {
+  if (mrp !== undefined && mrp !== oldMedicine.mrp) {
     fields.push(`mrp = $${index++}`);
     values.push(mrp);
   }
-    if (batch_no) {
+    if (batch_no && batch_no !== oldMedicine.batch_no) {
     fields.push(`batch_no = $${index++}`);
     values.push(batch_no);
-    chexckBatchno = true;;
   }
 
-  if (packed_type) {
+  if (packed_type && packed_type !== oldMedicine.packed_type) {
     fields.push(`packed_type = $${index++}`);
     values.push(packed_type);
   }
+
    
-  if (invoice_no) {
-    fields.push(`invoice_no = $${index++}`);
-    values.push(invoice_no);
-  }
 
   if (fields.length === 0) {
     throw new Error('No fields to update. Please provide at least one field to update.');
   }
 
-  fields.push(`updated_at = CURRENT_TIMESTAMP`);
   values.push(medicine_id);
 
   const updateQuery = `
@@ -245,52 +255,37 @@ const updateMedicine_info = asyncHandler(async (req, res) => {
     WHERE medicine_id = $${index}
     RETURNING *;
   `;
-
-  const { rows: updatedRows } = await pool.query(updateQuery, values);
-  const updatedMedicine = updatedRows[0];
-
+  
+  const updatedMedicine =await pool.query(updateQuery,values).rows;
+  let invoice_adjustment;
+//there change in stock and purchase price 
+  if(checkPurchasePrice || checkStock_quantity ){
   // Step 3: Calculate old and new line totals
-  const oldTotal = parseFloat(oldMedicine.purchase_price) * parseInt(oldMedicine.stock_quantity);
- 
-  const newPurchasePrice = updatedMedicine.purchase_price;
-  const newStockQuantity = updatedMedicine.stock_quantity;
-  const newTotal = parseFloat(newPurchasePrice) * parseInt(newStockQuantity);
-  const delta = newTotal - oldTotal;
-   if(chexckBatchnoInvoice){
-    const updateBatchQuery = `
-    UPDATE invoices
-SET total_amount = total_amount - $1
-WHERE invoice_id = $2;`;
-    const result = await pool.query(updateBatchQuery, [oldTotal, oldRows.invoice_no]);
-    if (result.rowCount === 0) {
-      throw new Error('Failed to update invoice total for batch number change.');
-    }
-    const findNewBatchInvoiceQuery = `
-    SELECT invoice_id as newinvoice_id FROM invoices WHERE  invoice_no= $1; `;
-    const resultNewBatch = await pool.query(findNewBatchInvoiceQuery, [invoice_no]);
 
-  }
+    const oldTotal = parseFloat(oldMedicine.purchase_price) * parseInt(oldMedicine.stock_quantity);
+ const newPurchasePrice = purchase_price !== undefined ? purchase_price : oldMedicine.purchase_price;
+const newStockQuantity = stock_quantity !== undefined ? stock_quantity : oldMedicine.stock_quantity;
+const newTotal = newPurchasePrice * newStockQuantity;
+const delta = newTotal -oldTotal;
 
-  // Step 4: Update invoice total_amount
-  await pool.query(
-    `
-    UPDATE invoices
-    SET total_amount = total_amount + $1,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE invoice_id = $2;
-  `,
-    [delta, invoiceId]
-  );
-
-  res.status(200).json({
-    message: 'Medicine updated and invoice total adjusted.',
-    updated_medicine: updatedMedicine,
-    invoice_adjustment: {
+   await updateInvoiceTotal(invoiceId, delta);
+      invoice_adjustment ={
       previous_amount: oldTotal.toFixed(2),
       new_amount: newTotal.toFixed(2),
       delta: delta.toFixed(2)
     }
+ 
+
+  }
+
+
+   res.status(200).json({
+    message: 'Medicine updated and invoice total adjusted.',
+    updated_medicine: updatedMedicine,
+    invoice_adjustment: invoice_adjustment
   });
+
+
 });
 
 
@@ -304,6 +299,39 @@ const handleGetMedicineStockData = asyncHandler(async (req, res) => {
   res.status(200).json({ no_medicine: rows.length, rows });
 });
 
+//================================================================
+//delete medicine
+//===============================================================
+const deleteMedicine = asyncHandler(async (req, res) => {
+  const medicine_id = req.params.id;
+
+  const checkMedicine = `SELECT * FROM medicine_stock WHERE medicine_id = $1;`;
+  const { rows: medicine } = await pool.query(checkMedicine, [medicine_id]);
+
+  if (medicine.length === 0) {
+    throw new Error(`Medicine not found with id ${medicine_id}`);
+  }
+
+  const deleteQuery = `DELETE FROM medicine_stock WHERE medicine_id = $1;`;
+  await pool.query(deleteQuery, [medicine_id]);
+
+  const invoice_id = medicine[0].invoice_id;
+  const stock_quantity = parseFloat(medicine[0].stock_quantity);
+  const purchase_price = parseFloat(medicine[0].purchase_price);
+  const delta = -1 * (stock_quantity * purchase_price);
+  console.log(`Delta for invoice adjustment: ${delta}`);
+
+  await updateInvoiceTotal(invoice_id, delta);
+
+  res.status(200).json({
+    status: "success",
+    message: `Deleted medicine with id ${medicine_id}`,
+  });
+});
+
+
+
+//===============================================================
 // =======================
 // 5. Search Medicine by Query
 // =======================
@@ -321,21 +349,7 @@ const MedicineSearchQuery = asyncHandler(async (req, res) => {
     data: result.rows,
   });
 });
-//==================================
-//get medicine stock by id
-//==================================  
-const getMedicineStockById = asyncHandler(async (req, res) => {
-  const medicineId = req.params.id;
-  const result = await pool.query('SELECT * FROM medicine_stock WHERE medicine_id = $1', [medicineId]);
-
-  if (result.rowCount === 0) {
-    return res.status(404).json({ message: 'Medicine not found' });
-  }
-
-  res.json(result.rows[0]);
-});
 
 
-
-module.exports = { handleGetMedicineStockData, MedicineSearchQuery , addMedicineStock ,updateMedicine_info, getMedicineStockById };
+module.exports = { handleGetMedicineStockData, MedicineSearchQuery , addMedicineStock ,updateMedicine_info,deleteMedicine };
  

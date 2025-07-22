@@ -37,13 +37,17 @@ function buildMedicineSearchQuery(params) {
       ms.brand_name,
       ms.batch_no,
       ms.invoice_id,
+      ms.packed_type,
       ms.purchase_price,
       ms.mrp,
+      ms.stock_quantity,
+      ms.mfg_date,
       ms.expiry_date,
       i.invoice_no,
       i.payment_status,
       i.payment_date,
       i.invoice_date,
+     
       w.name AS wholesaler_name
     FROM medicine_stock ms
     JOIN invoices i ON ms.invoice_id = i.invoice_id

@@ -103,8 +103,7 @@ function buildInvoiceSearchQuery(params) {
     text += ` OFFSET $${idx++}`;
     values.push(parseInt(offset, 10));
   }
-   console.log(text);
-   console.log(values);
+
   return { text, values };
 }
 

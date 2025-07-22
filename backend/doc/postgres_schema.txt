@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     invoice_id SERIAL PRIMARY KEY,
     invoice_no VARCHAR(20) UNIQUE NOT NULL,
     invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    total_amount NUMERIC(12,2) CHECK (total_amount >= 0) NOT NULL,
+    total_amount NUMERIC(12,2) CHECK (total_amount >= 0) DEFAULT 0  NOT NULL,
     payment_status payment_status_enum DEFAULT 'Unpaid' NOT NULL,
     payment_date DATE,
     wholesaler_id INT NOT NULL,
@@ -41,10 +41,10 @@ CREATE TABLE IF NOT EXISTS medicine_stock (
     invoice_id INT NOT NULL,
     medicine_name VARCHAR(100) NOT NULL,
     brand_name VARCHAR(100),
-    stock_quantity INT CHECK (stock_quantity > 0),
+    stock_quantity INT CHECK (stock_quantity > 0) DEFAULT 0,
     mfg_date DATE,
     expiry_date DATE,
-    purchase_price NUMERIC(10,2) CHECK (purchase_price >= 0),
+    purchase_price NUMERIC(10,2) CHECK (purchase_price >= 0) DEFAULT 0.00,
     mrp NUMERIC(10,2) CHECK (mrp >= 0),
     batch_no VARCHAR(20),
     packed_type VARCHAR(50),
@@ -118,3 +118,114 @@ INSERT INTO medicine_stock (invoice_id, medicine_name, brand_name, stock_quantit
   (4, 'Lisinopril', 'Zestril', 65, '2023-11-01', '2025-11-01', 20.00, 32.00, 'LS345H', 'Strip', 'CMP-001'),
   (4, 'Fluconazole', 'Forcan', 90, '2024-03-01', '2026-03-01', 16.00, 27.00, 'FC456I', 'Strip', 'CMP-001'),
   (4, 'Loratadine', 'Claritin', 100, '2024-02-01', '2026-02-01', 10.00, 18.00, 'LR567J', 'Strip', 'CMP-001');
+
+
+--employees
+CREATE TABLE employees (
+    employee_id SERIAL PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50),
+    gender VARCHAR(10) CHECK (gender IN ('Male', 'Female', 'Other')),
+    date_of_birth DATE,
+    contact_number VARCHAR(15),
+    email VARCHAR(100) UNIQUE,
+    address TEXT,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('admin', 'manager', 'worker')),
+    date_of_joining DATE DEFAULT CURRENT_DATE,
+    salary NUMERIC(10, 2) CHECK (salary >= 0),
+    status VARCHAR(20) DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'Suspended')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--logins
+CREATE TABLE logins (
+    login_id SERIAL PRIMARY KEY,
+    employee_id INT NOT NULL UNIQUE REFERENCES employees(employee_id) ON DELETE CASCADE,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    password_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'Suspended')), 
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE OR REPLACE FUNCTION create_login_after_employee_insert()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Only insert if employee email is provided
+    IF NEW.email IS NOT NULL THEN
+        INSERT INTO logins (
+            employee_id,
+            email,
+            password_hash,
+            status
+        )
+        VALUES (
+            NEW.employee_id,
+            NEW.email,
+            'default_hashed_password',  -- ⚠️ Replace this with actual hash logic in app
+            NEW.status
+        );
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER trg_create_login_after_employee_insert
+AFTER INSERT ON employees
+FOR EACH ROW
+EXECUTE FUNCTION create_login_after_employee_insert();
+
+
+--function to change status of emplyee and logins table 
+
+CREATE OR REPLACE FUNCTION sync_employee_login_status()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Only proceed if the status has changed
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+        UPDATE logins
+        SET status = NEW.status
+        WHERE employee_id = NEW.employee_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER trg_sync_login_status
+AFTER UPDATE OF status ON employees
+FOR EACH ROW
+EXECUTE FUNCTION sync_employee_login_status();
+
+INSERT INTO employees (first_name, last_name, gender, date_of_birth, contact_number, email, address, role, date_of_joining, salary, status)
+VALUES 
+('Amit', 'Sharma', 'Male', '1990-06-15', '9876543210', 'amit.sharma@example.com', 'Delhi, India', 'admin', '2021-01-10', 75000.00, 'Active'),
+
+('Priya', 'Mehra', 'Female', '1992-08-22', '9812345678', 'priya.mehra@example.com', 'Mumbai, India', 'manager', '2022-03-01', 60000.00, 'Active'),
+
+('Ravi', 'Patel', 'Male', '1988-12-05', '9856741230', 'ravi.patel@example.com', 'Ahmedabad, India', 'worker', '2023-07-15', 25000.00, 'Active'),
+
+('Sunita', 'Verma', 'Female', '1995-04-10', '9890123456', 'sunita.verma@example.com', 'Kolkata, India', 'worker', '2024-01-20', 24000.00, 'Active'),
+
+('Anil', 'Kapoor', 'Male', '1985-11-18', '9822334455', 'anil.kapoor@example.com', 'Chennai, India', 'manager', '2021-09-01', 58000.00, 'Suspended'),
+
+('Deepika', 'Joshi', 'Female', '1991-02-28', '9871122334', 'deepika.joshi@example.com', 'Jaipur, India', 'worker', '2023-05-10', 23000.00, 'Active'),
+
+('Raj', 'Singh', 'Male', '1993-10-12', '9809988776', 'raj.singh@example.com', 'Bhopal, India', 'worker', '2022-11-25', 26000.00, 'Inactive'),
+
+('Neha', 'Gupta', 'Female', '1990-09-09', '9844556677', 'neha.gupta@example.com', 'Pune, India', 'manager', '2020-12-01', 62000.00, 'Active'),
+
+('Karan', 'Yadav', 'Male', '1989-01-15', '9833445566', 'karan.yadav@example.com', 'Lucknow, India', 'worker', '2024-03-05', 22000.00, 'Active'),
+
+('Tanya', 'Khan', 'Female', '1994-05-30', '9811778899', 'tanya.khan@example.com', 'Nagpur, India', 'admin', '2019-08-18', 78000.00, 'Active');
+
+
+
+

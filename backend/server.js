@@ -16,7 +16,7 @@ app.use(express.json()); // Middleware to parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Middleware to parse URL-encoded bodies
 app.use(morgan('dev')); // Use morgan for logging HTTP requests
 // Use the admin router for routes starting with /admin
-app.use('/admin', adminRouter);
+app.use('/admin',, adminRouter);
 app.use(errorHandler); // Error handling middleware
 
 

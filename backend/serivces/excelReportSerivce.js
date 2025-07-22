@@ -5,7 +5,7 @@ const ExcelJS = require('exceljs');
 
 // 1. Fetch data from DB
 const   fetchTableData= async (tableName) => {
-  const allowedTables = ['medicine_stock', 'wholesalers', 'purchases']; // whitelist important for security
+  const allowedTables = ['medicine_stock', 'wholesalers', 'invoices']; // whitelist important for security
   if (!allowedTables.includes(tableName)) {
     throw new Error('Invalid table name');
   }

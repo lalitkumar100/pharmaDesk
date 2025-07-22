@@ -10,6 +10,8 @@ DROP FUNCTION IF EXISTS update_timestamp();
 DROP TABLE IF EXISTS medicine_stock CASCADE;
 DROP TABLE IF EXISTS invoices CASCADE;
 DROP TABLE IF EXISTS wholesalers CASCADE;
+Drop table if EXISTS employees CASCADE;
+Drop table if Exists logins CASCADE;
 
 -- Drop ENUM type (after dropping all tables using it)
 DROP TYPE IF EXISTS payment_status_enum;

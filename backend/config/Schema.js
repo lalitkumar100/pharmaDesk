@@ -1,5 +1,5 @@
 const pool = require('../config/db'); // Assuming you have a db.js file for database connection
-    const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 
 function createSchemaAndData() {
