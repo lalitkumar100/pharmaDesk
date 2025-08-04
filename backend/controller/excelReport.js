@@ -2,14 +2,14 @@
 // Module Imports
 // =======================
 
-const asyncHandler = require('../serivces/asyncHandler');
+const asyncHandler = require('../services/asyncHandler');
 
 const {
   fetchTableData,
   generateExcelFromData,
   sendExcelResponse,
   
-} = require('../serivces/excelReportSerivce');
+} = require('../services/excelReportSerivce');
 
 
 

@@ -3,15 +3,15 @@
 // =======================
 const Joi = require('joi');
 const pool = require('../config/db');
-const asyncHandler = require('../serivces/asyncHandler');
-const { wholesalerSchema, updateWholesalerSchema } = require('../serivces/schemaValidation');
+const asyncHandler = require('../services/asyncHandler');
+const { wholesalerSchema ,updateWholesalerSchema } = require('../services/schemaValidation');
 
 
 // =======================
 // 3. Get All Wholesalers (Vendors)
 // =======================
 const handleGetwholesalersData = asyncHandler(async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM wholesalers');
+  const { rows } = await pool.query('SELECT * FROM wholesalers WHERE  deleted_at is NULL');
 
   if (!rows || rows.length === 0) {
     res.status(404);
@@ -77,11 +77,11 @@ const updateWholesalerData =   asyncHandler(async (req, res) => {
   const updates = fields.map((field, index) => `${field} = $${index + 1}`).join(', ');
   const values = Object.values(value);
 
-  try {
+
     const result = await pool.query(
       `UPDATE wholesalers
        SET ${updates}
-       WHERE wholesaler_id = $${fields.length + 1}
+       WHERE wholesaler_id = $${fields.length + 1} AND deleted_at IS NULL 
        RETURNING *`,
       [...values, id]
     );
@@ -96,14 +96,6 @@ const updateWholesalerData =   asyncHandler(async (req, res) => {
       message: 'Wholesaler updated successfully',
       data: result.rows[0]
     });
-
-  } catch (err) {
-    if (err.code === '23505') {
-      res.status(409);
-      throw new Error('GST number already exists');
-    }
-    throw err;
-  }
 });
 
 
@@ -115,7 +107,10 @@ const deleteWholesaler = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const result = await pool.query(
-    'DELETE FROM wholesalers WHERE wholesaler_id = $1 RETURNING *',
+    `UPDATE wholesalers
+SET deleted_at = CURRENT_TIMESTAMP
+WHERE wholesaler_id = $1
+RETURNING *;`,
     [id]
   );
 
@@ -132,6 +127,14 @@ const deleteWholesaler = asyncHandler(async (req, res) => {
 });
 
 
+
+
+
+
+
+
+
+
 //========================
 // Module Exports   
 //=========================
@@ -139,5 +142,6 @@ module.exports = {
     handleGetwholesalersData,
     addWholesaler,
     updateWholesalerData,
-    deleteWholesaler
+    deleteWholesaler,
+  
     };

@@ -1,5 +1,7 @@
 const pool = require('../config/db');
-const asyncHandler = require('../serivces/asyncHandler');
+const asyncHandler = require('../services/asyncHandler');
+const {    getWholesalerIdByName, getOrCreateInvoice, updateInvoiceTotal,delete1  } = require('../services/medicie_serivce');
+const { addExpiryStock } = require('../services/expiry_Service');
 
 const handleExpiringMedicines = asyncHandler(async (req, res) => {
 
@@ -23,8 +25,7 @@ const handleExpiringMedicines = asyncHandler(async (req, res) => {
 
 
     const result = await pool.query(
-      `
-      SELECT count(*) OVER() AS total_count,
+      ` SELECT count(*) OVER() AS total_count,
         medicine_id,
         medicine_name,
         brand_name,
@@ -50,6 +51,38 @@ if (!rows || rows.length === 0) {
 
 });
 
+//=======================
+//remoce exprie medicine
+//========================
+const removeExpiringMedicines = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ error: 'Medicine ID is required' });
+  }
+
+  const addExpiryStock = await addExpiryStock(id);
+  if (!addExpiryStock.success) {  
+     res.status(500)
+     throw new Error('Failed to add medicine to expiry stock');
+  }
+  const deleteResult = await delete1(id);
+  if (!deleteResult) {  
+    res.status(500)
+    throw new Error('Failed to delete medicine from stock');
+  }
+
+  res.json({
+    message: 'Medicine as exprire successfully',
+    data: result.rows[0],
+  });
+});
+
+
 module.exports = {
-  handleExpiringMedicines
+  handleExpiringMedicines,
+  removeExpiringMedicines
 };
+
+
+// =======================

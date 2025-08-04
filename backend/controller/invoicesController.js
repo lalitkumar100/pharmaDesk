@@ -1,141 +1,114 @@
 const pool = require('../config/db');
-const asyncHandler = require('../serivces/asyncHandler');
-const {buildInvoiceSearchQuery} =require('../serivces/InvoiceSearchQuery');
+const asyncHandler = require('../services/asyncHandler');
+const {buildInvoiceSearchQuery,checkInvoiceExists} =require('../services/invoice_Service');
+const { checkWholesalerExistsByName } = require('../services/wholesaler_service');
+
+
+
 
 // ============================
-// Helper: Check if wholesaler exists
-// ============================
-const checkWholesalerExists = async (wholesaler_id) => {
-  const result = await pool.query(
-    'SELECT wholesaler_id FROM wholesalers WHERE wholesaler_id = $1',
-    [wholesaler_id]
-  );
-  return result.rowCount > 0;
-};
-
-// ============================
-// Helper: Check if invoice exists
-// ============================
-const checkInvoiceExists = async (invoice_id) => {
-  const result = await pool.query(
-    'SELECT * FROM invoices WHERE invoice_id = $1',
-    [invoice_id]
-  );
-  return result.rowCount > 0;
-};
-
-// ============================
-// 1. Get All Invoices
+// 1. Get All Invoices  
 // ============================
 const handleGetInvoicesData = asyncHandler(async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM invoices ORDER BY invoice_id');
+  const { rows } = await pool.query(
+    `SELECT
+  w.name,
+  i.invoice_id,
+  i.invoice_no,
+  i.invoice_date,
+  i.total_amount,
+  i.paid_amount,
+  i.payment_status,
+  i.payment_date
+FROM invoices i
+JOIN wholesalers w ON i.wholesaler_id = w.wholesaler_id
+WHERE i.deleted_at IS NULL AND w.deleted_at IS NULL
+ORDER BY i.invoice_id DESC;`
+  );
 
   if (!rows.length) {
     res.status(404);
-    throw new Error('No invoice data found');
+    throw new Error('No active invoice data found');
   }
 
-  res.status(200).json({ no_of_invoices: rows.length, invoices: rows });
-});
-
-// ============================
-// 2. Add New Invoice
-// ============================
-const addNewInvoice = asyncHandler(async (req, res) => {
-  const {
-    invoice_no,
-    invoice_date,
-    total_amount,
-    payment_status = 'Unpaid',
-    payment_date,
-    wholesaler_id
-  } = req.body;
-
-  // Check wholesaler existence
-  const wholesalerExists = await checkWholesalerExists(wholesaler_id);
-  if (!wholesalerExists) {
-    res.status(400);
-    throw new Error('Wholesaler not found');
-  }
-
-  // Insert new invoice
-  const insertQuery = `
-    INSERT INTO invoices (
-      invoice_no, invoice_date, total_amount,
-      payment_status, payment_date, wholesaler_id
-    )
-    VALUES ($1, $2, $3, $4, $5, $6)
-    RETURNING *
-  `;
-
-  const values = [
-    invoice_no,
-    invoice_date || new Date(),
-    total_amount,
-    payment_status,
-    payment_date || null,
-    wholesaler_id
-  ];
-
-  const { rows } = await pool.query(insertQuery, values);
-
-  res.status(201).json({
-    message: 'Invoice created successfully',
-    invoice: rows[0]
+  res.status(200).json({
+    no_of_invoices: rows.length,
+    invoices: rows
   });
 });
 
-// ============================
-// 3. Update Invoice
-// ============================
+
+//==========================================
+// 2. Update Invoice done
+//==========================================
 const updateInvoice = asyncHandler(async (req, res) => {
-  const { invoice_id } = req.params;
+  const { id } = req.params;
+  const invoice_id = parseInt(id, 10);
+ 
+  
   const {
     invoice_no,
     invoice_date,
-    total_amount,
     payment_status,
-    payment_date,
-    wholesaler_id
+    paid_amount,
+    wholesaler_name,
   } = req.body;
 
-  // Check invoice
+  // Check if invoice exists
   const invoiceExists = await checkInvoiceExists(invoice_id);
+
+   
   if (!invoiceExists) {
     res.status(404);
     throw new Error('Invoice not found');
   }
 
-  // Check wholesaler
-  const wholesalerExists = await checkWholesalerExists(wholesaler_id);
-  if (!wholesalerExists) {
-    res.status(400);
-    throw new Error('Wholesaler not found');
+  const fields = [];
+  const values = [];
+  let paramIndex = 1;
+
+  if (invoice_no !== undefined) {
+    fields.push(`invoice_no = $${paramIndex++}`);
+    values.push(invoice_no);
   }
+  if (invoice_date !== undefined) {
+    fields.push(`invoice_date = $${paramIndex++}`);
+    values.push(invoice_date);
+  }
+  if (payment_status !== undefined) {
+    fields.push(`payment_status = $${paramIndex++}`);
+    values.push(payment_status);
+  }
+  if (paid_amount !== undefined) {
+    fields.push(`paid_amount = $${paramIndex++}`);
+    values.push(paid_amount);
+  }
+
+  if (wholesaler_name !== undefined) {
+    const ans = await checkWholesalerExistsByName(wholesaler_name);
+    if (!ans) {
+      res.status(404);
+      throw new Error('The given wholesaler was not found');
+    }
+    fields.push(`wholesaler_id = $${paramIndex++}`);
+    values.push(ans);
+  }
+
+  if (fields.length === 0) {
+    res.status(400);
+    throw new Error('No valid fields provided for update');
+  }
+
+  fields.push(`updated_at = CURRENT_TIMESTAMP`);
 
   const updateQuery = `
     UPDATE invoices
-    SET
-      invoice_no = $1,
-      invoice_date = $2,
-      total_amount = $3,
-      payment_status = $4,
-      payment_date = $5,
-      wholesaler_id = $6,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE invoice_id = $7
+    SET ${fields.join(', ')}
+    WHERE invoice_id = $${paramIndex++} AND deleted_at IS NULL
     RETURNING *
   `;
 
-  const values = [
-    invoice_no,
-    invoice_date || new Date(),
-    total_amount,
-    payment_status,
-    payment_date || null,
-    wholesaler_id,
-    invoice_id
-  ];
+  values.push(invoice_id);
 
   const { rows } = await pool.query(updateQuery, values);
 
@@ -145,19 +118,20 @@ const updateInvoice = asyncHandler(async (req, res) => {
   });
 });
 
+
 // ============================
 // 4. Delete Invoice
 // ============================
 const deleteInvoice = asyncHandler(async (req, res) => {
-  const { invoice_id } = req.params;
-
+  const { id } = req.params;
+  const invoice_id = parseInt(id, 10);
   const invoiceExists = await checkInvoiceExists(invoice_id);
   if (!invoiceExists) {
     res.status(404);
     throw new Error('Invoice not found');
   }
 
-  await pool.query('DELETE FROM invoices WHERE invoice_id = $1', [invoice_id]);
+  await pool.query('UPDATE invoices SET deleted_at = CURRENT_TIMESTAMP WHERE invoice_id = $1', [invoice_id]);
 
   res.status(200).json({
     message: 'Invoice deleted successfully'
@@ -171,12 +145,11 @@ const InvoiceSerach = asyncHandler(async(req,res)=>{
     
         const {text ,values } = buildInvoiceSearchQuery(req.query);
         let result;
-       try {
+ 
        result = await  pool.query(text,values);
+  
         
-       } catch (error) {
-        throw new Error(error);
-      }
+
       if(result.rows.length == 0){
         res.status(200).json({message:"no invoices is found"})
        }
@@ -188,10 +161,65 @@ const InvoiceSerach = asyncHandler(async(req,res)=>{
    
 });
 
+const getInvoiceById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // Step 1: Fetch invoice + wholesaler details
+  const invoiceQuery = `
+    SELECT 
+      i.invoice_id,
+      i.invoice_no,
+      w.name AS wholesaler,
+      i.created_at,
+      i.total_amount,
+      i.paid_amount,
+      i.payment_status
+    FROM invoices i
+    JOIN wholesalers w ON i.wholesaler_id = w.wholesaler_id
+    WHERE i.invoice_id = $1
+  `;
+
+  const invoiceResult = await pool.query(invoiceQuery, [id]);
+
+  if (invoiceResult.rows.length === 0) {
+    res.status(404);
+    throw new Error('Invoice not found');
+  }
+
+  const invoice = invoiceResult.rows[0];
+
+  // Step 2: Fetch medicines for the invoice
+  const medicineQuery = `
+    SELECT 
+      medicine_name,
+      stock_quantity AS qty,
+      purchase_price AS price
+    FROM medicine_stock
+    WHERE invoice_id = $1
+  `;
+
+  const medicineResult = await pool.query(medicineQuery, [invoice.invoice_id]);
+
+  // Step 3: Send response
+  res.json({
+    invoice_no: invoice.invoice_no,
+    wholesaler: invoice.wholesaler,
+    created_at: invoice.created_at,
+    total_amount: parseFloat(invoice.total_amount),
+    paid_amount: parseFloat(invoice.paid_amount),
+    payment_status: invoice.payment_status,
+    medicines: medicineResult.rows.map(med => ({
+      medicine: med.medicine_name,
+      qty: med.qty,
+      price: parseFloat(med.price)
+    }))
+  });
+});
+
 module.exports = {
   handleGetInvoicesData,
-  addNewInvoice,
   updateInvoice,
   deleteInvoice,
-  InvoiceSerach
+  InvoiceSerach,
+  getInvoiceById
 };

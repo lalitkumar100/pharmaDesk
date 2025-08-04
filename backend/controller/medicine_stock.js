@@ -1,49 +1,9 @@
 const pool = require('../config/db');
-const asyncHandler = require('../serivces/asyncHandler');
-const { buildMedicineSearchQuery } = require('../serivces/MedicineSearchQuery');
+const asyncHandler = require('../services/asyncHandler');
+const { buildMedicineSearchQuery,   getWholesalerIdByName, getOrCreateInvoice, updateInvoiceTotal,delete1  } = require('../services/medicie_serivce');
 
-// Get wholesaler ID by name
-const getWholesalerIdByName = async (name) => {
-  const query = 'SELECT wholesaler_id FROM wholesalers WHERE name = $1';
-  const result = await pool.query(query, [name]);
-  return result.rowCount ? result.rows[0].wholesaler_id : null;
-};
 
-// Get or create invoice
-const getOrCreateInvoice = async (invoiceNumber, wholesalerId) => {
-  try {
-    const queryInvoice = 'SELECT invoice_id FROM invoices WHERE invoice_no = $1 AND wholesaler_id = $2';
-  const result = await pool.query(queryInvoice, [invoiceNumber, wholesalerId]);
 
-  if (result.rowCount > 0) return result.rows[0].invoice_id;
-
-  const insertQuery = `
-    INSERT INTO invoices (invoice_no, wholesaler_id)
-    VALUES ($1, $2)
-    RETURNING invoice_id
-  `;
-  const insertResult = await pool.query(insertQuery, [invoiceNumber, wholesalerId]);
-  if (insertResult.rowCount === 0) return null;
-
-  return insertResult.rows[0].invoice_id;
-  } catch (error) {
-    throw new Error('Failed to get or create invoice');
-    
-  }
-};
-
-const updateInvoiceTotal = async (invoiceId, Amount) => {
-  try {
-    const query = `UPDATE invoices
-      SET total_amount =total_amount+ $1 
-      WHERE invoice_id = $2;
-    `;
-    await pool.query(query, [Amount, invoiceId]); // ✅ Correct variable
-  } catch (error) {
-    res.status(500);
-    throw new Error('Failed to update invoice total');
-  }
-};
 
 
 // Main route
@@ -294,7 +254,29 @@ const delta = newTotal -oldTotal;
 // 2. Get All Medicine Stock
 // =======================
 const handleGetMedicineStockData = asyncHandler(async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM medicine_stock');
+  const { rows } = await pool.query(`SELECT 
+    ms.medicine_id as id,
+    ms.medicine_name,
+    ms.brand_name AS brand,
+    ms.batch_no,
+    ms.stock_quantity AS quantity,
+    ms.mrp,
+    ms.purchase_price,
+    ms.invoice_no,
+    ms.expiry_date,
+    w.name AS wholesaler,
+    ms.packed_type,
+    ms.mfg_date,
+    ms.created_at
+FROM 
+    medicine_stock ms
+JOIN 
+    invoices i ON ms.invoice_id = i.invoice_id
+JOIN 
+    wholesalers w ON i.wholesaler_id = w.wholesaler_id
+WHERE 
+    ms.stock_quantity > 0
+    AND (ms.expiry_date IS NULL OR ms.expiry_date > CURRENT_DATE)`);
 
   res.status(200).json({ no_medicine: rows.length, rows });
 });
@@ -304,24 +286,7 @@ const handleGetMedicineStockData = asyncHandler(async (req, res) => {
 //===============================================================
 const deleteMedicine = asyncHandler(async (req, res) => {
   const medicine_id = req.params.id;
-
-  const checkMedicine = `SELECT * FROM medicine_stock WHERE medicine_id = $1;`;
-  const { rows: medicine } = await pool.query(checkMedicine, [medicine_id]);
-
-  if (medicine.length === 0) {
-    throw new Error(`Medicine not found with id ${medicine_id}`);
-  }
-
-  const deleteQuery = `DELETE FROM medicine_stock WHERE medicine_id = $1;`;
-  await pool.query(deleteQuery, [medicine_id]);
-
-  const invoice_id = medicine[0].invoice_id;
-  const stock_quantity = parseFloat(medicine[0].stock_quantity);
-  const purchase_price = parseFloat(medicine[0].purchase_price);
-  const delta = -1 * (stock_quantity * purchase_price);
-  console.log(`Delta for invoice adjustment: ${delta}`);
-
-  await updateInvoiceTotal(invoice_id, delta);
+     await delete1(medicine_id);
 
   res.status(200).json({
     status: "success",
@@ -330,26 +295,146 @@ const deleteMedicine = asyncHandler(async (req, res) => {
 });
 
 
+// ===============================
+// Controller: Get Filtered Medicines
+// ===============================
 
-//===============================================================
-// =======================
-// 5. Search Medicine by Query
-// =======================
-const MedicineSearchQuery = asyncHandler(async (req, res) => {
-  const { text, values } = buildMedicineSearchQuery(req.query);
-  const result = await pool.query(text, values);
+const  getFilteredMedicines=  asyncHandler( async (req, res) => {
+    const params = req.query;
 
-  if (!result.rows.length) {
-    // If no rows found, return a 404 status with a message
-    return res.status(404).json({ message: 'No matching medicines found' });
+    const limit = parseInt(params.limit) || 10;
+    const offset = parseInt(params.offset) || 0;
+    const currentPage = Math.floor(offset / limit) + 1;
+
+    // Validation
+    if (limit <= 0 || offset < 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid pagination parameters',
+      });
+    }
+
+    // Build both queries
+    const { text: dataQuery, values: dataValues } = buildMedicineSearchQuery(
+      { ...params, limit, offset },
+      false
+    );
+
+    const { text: countQueryText, values: countValues } = buildMedicineSearchQuery(
+      { ...params },
+      true
+    );
+
+    const countQuery = `SELECT COUNT(*) AS total_count FROM (${countQueryText}) AS subquery`;
+
+    const [dataResult, countResult] = await Promise.all([
+      pool.query(dataQuery, dataValues),
+      pool.query(countQuery, countValues),
+    ]);
+
+    const totalCount = parseInt(countResult.rows[0].total_count, 10);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Medicines fetched successfully',
+      data: {
+        medicines: dataResult.rows,
+        pagination: {
+          total_items: totalCount,
+          total_pages: totalPages,
+          current_page: currentPage,
+          per_page: limit,
+        },
+      },
+    });
+  });
+
+
+
+
+
+//=========================================//
+//getMedicineInfoById
+//===========================================//
+const getMedicineInfoById = asyncHandler(async(req,res)=>{
+  const {Id} = req.params;
+
+  if(!Id){
+       throw new Error(`valid id`);
+  }
+  const query = `SELECT * FROM view_medicine_stock_with_wholesaler where medicine_id=$1`;
+  const {rows : result } = await pool.query(query, [ Id]);
+  if(!result){
+    throw new Error(`not medicine is found by this id ${id}`);
+  }
+  res.status(200)
+  .json({
+    status:"success",
+    message:"medicne info is found",
+    medicine:result
+  });
+
+});
+
+const recommondationMedicineName = asyncHandler(async (req, res) => {
+  const { query } = req.query;
+
+  if (!query || query.trim() === "") {
+    return res.status(400).json({
+      status: "fail",
+      message: "Query parameter is required",
+    });
   }
 
-  res.json({
-    count: result.rows.length,
-    data: result.rows,
+  const search = `%${query.toLowerCase()}%`;
+
+  const sql = `
+    SELECT medicine_name,medicine_id ,batch_no
+    FROM medicine_stock 
+    WHERE LOWER(medicine_name) LIKE $1
+    ORDER BY medicine_name
+    LIMIT 5;
+  `;
+
+  const { rows } = await pool.query(sql, [search]);
+
+  res.status(200).json({
+    status: "success",
+     recommendations:rows
+
+  });
+});
+
+const recommondationMedicineName2 = asyncHandler(async (req, res) => {
+  const { query } = req.query;
+
+  if (!query || query.trim() === "") {
+    return res.status(400).json({
+      status: "fail",
+      message: "Query parameter is required",
+    });
+  }
+
+  const search = `%${query.toLowerCase()}%`;
+
+  const sql = `
+    SELECT DISTINCT medicine_name,medicine_id 
+    FROM medicine_stock 
+    WHERE LOWER(medicine_name) LIKE $1
+    ORDER BY medicine_name
+    LIMIT 5;
+  `;
+
+  const { rows } = await pool.query(sql, [search]);
+
+  res.status(200).json({
+    status: "success",
+      recommendations: rows.map(row => row.medicine_name) 
+
   });
 });
 
 
-module.exports = { handleGetMedicineStockData, MedicineSearchQuery , addMedicineStock ,updateMedicine_info,deleteMedicine };
+module.exports = { handleGetMedicineStockData, getFilteredMedicines , addMedicineStock ,updateMedicine_info,deleteMedicine ,getMedicineInfoById,recommondationMedicineName };
  
